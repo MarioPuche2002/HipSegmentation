@@ -1,0 +1,4 @@
+[data]
+images_dir = "C:/RUTA/A/TU/CARPETA/Imgs"
+masks_dir = "C:/RUTA/A/TU/CARPETA/Msks_png"
+dataset_csv = "C:/RUTA/A/TU/CARPETA/dataset.csv"

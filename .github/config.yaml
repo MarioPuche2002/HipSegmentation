@@ -1,0 +1,42 @@
+data:
+  processed_dir: data/processed
+  manifest_path: data/processed/manifest.csv
+  rejected_path: data/processed/rejected.csv
+  train_path: data/processed/train.csv
+  val_path: data/processed/val.csv
+  test_path: data/processed/test.csv
+  processed_images_dir: data/processed/images
+  processed_masks_dir: data/processed/masks
+  val_size: 0.15
+  test_size: 0.15
+  random_state: 42
+
+image_validation:
+  allowed_image_formats: [JPEG, JPG, PNG]
+  allowed_mask_formats: [PNG]
+  allowed_image_channels: [1, 3]
+  allowed_mask_channels: [1]
+  min_size: 32
+  max_size: 4096
+  num_classes: 5
+
+preprocessing:
+  target_size: 128
+  normalize_images: true
+  mask_interpolation: nearest
+
+model:
+  architecture: unet_custom
+  image_size: 128
+  num_classes: 5
+  base_filters: 128
+  batch_size: 4
+  epochs: 1000
+  early_stopping_patience: 30
+  optimizer: adam
+  loss: sparse_categorical_crossentropy
+  output_path: models/hip_segmentation_unet.h5
+
+api:
+  host: 0.0.0.0
+  port: 8000

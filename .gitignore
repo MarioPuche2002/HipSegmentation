@@ -1,0 +1,27 @@
+# Rutas locales de la maquina (contiene tus paths absolutos reales)
+paths.toml
+
+# Datos derivados (se regeneran con src/preprocess.py)
+data/processed/*
+!data/processed/.gitkeep
+
+# Modelos serializados y reportes (pesan mucho, no van a Git)
+models/*
+!models/.gitkeep
+
+# Entornos virtuales
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Sistema
+.DS_Store
