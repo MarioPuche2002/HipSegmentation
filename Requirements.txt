@@ -1,5 +1,4 @@
-#Version de python 3.9
-
+# Version de python 3.9.13
 tensorflow==2.10.1
 protobuf==3.19.6
 numpy==1.23.5
