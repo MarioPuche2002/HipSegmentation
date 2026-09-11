@@ -5,9 +5,9 @@ paths.toml
 data/processed/*
 !data/processed/.gitkeep
 
-# Modelos serializados y reportes (pesan mucho, no van a Git)
-models/*
-!models/.gitkeep
+# Modelos: el .h5 final SI se sube. Solo se excluye el
+# historial de entrenamiento crudo, que es un archivo auxiliar.
+models/training_history.csv
 
 # Entornos virtuales
 .venv/

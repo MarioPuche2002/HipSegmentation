@@ -29,10 +29,10 @@ model:
   architecture: unet_custom
   image_size: 128
   num_classes: 5
-  base_filters: 128
-  batch_size: 4
-  epochs: 1000
-  early_stopping_patience: 30
+  base_filters: 64
+  batch_size: 2
+  epochs: 150
+  early_stopping_patience: 5
   optimizer: adam
   loss: sparse_categorical_crossentropy
   output_path: models/hip_segmentation_unet.h5
