@@ -1,7 +1,10 @@
 """
 API de segmentacion de cadera. Recibe una radiografia (solo eso, NUNCA
-una mascara -- la mascara es lo que este servicio genera) y devuelve
-la mascara de segmentacion predicha, coloreada, como PNG en base64.
+una mascara -- la mascara es lo que este servicio genera).
+
+Dos endpoints:
+    POST /predict        -> JSON con la mascara en base64 + metadatos
+    POST /predict/image   -> PNG crudo de la mascara (para ver directo)
 
 Ejecutar en local:
     uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
@@ -16,12 +19,12 @@ from typing import Dict
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from pandera.errors import SchemaErrors
 from pydantic import BaseModel
 
 from src.config import load_config
-from src.predict import load_model, predict_mask
+from src.predict import load_model, predict_mask, predict_mask_png_bytes
 
 CONFIG = load_config()
 
@@ -49,11 +52,6 @@ def startup_event():
 
 @app.exception_handler(RequestValidationError)
 async def error_de_validacion_en_espanol(request: Request, exc: RequestValidationError):
-    """
-    FastAPI/Pydantic devuelven los errores de validacion (422) en ingles
-    por defecto (ej. 'Field required'). Este manejador los traduce a
-    los mensajes mas comunes, para que la API responda en español.
-    """
     traducciones = {
         "Field required": "Este campo es obligatorio",
         "field required": "Este campo es obligatorio",
@@ -96,3 +94,32 @@ async def predict(file: UploadFile = File(...)):
         )
 
     return result
+
+
+@app.post(
+    "/predict/image",
+    responses={200: {"content": {"image/png": {}}}},
+    response_class=Response,
+)
+async def predict_image(file: UploadFile = File(...)):
+    """
+    Igual que /predict, pero devuelve la mascara como imagen PNG cruda
+    (Content-Type: image/png) en vez de JSON con base64 -- util para
+    abrir el resultado directamente en el navegador o en Swagger UI sin
+    tener que decodificar nada. No trae 'porcentaje_pixeles_por_clase'
+    ni 'se_aplico_preprocesamiento' -- para eso, usa /predict.
+    """
+    if file.content_type not in ("image/png", "image/jpeg", "image/jpg"):
+        raise HTTPException(status_code=400, detail="Solo se aceptan imagenes PNG o JPEG")
+
+    image_bytes = await file.read()
+
+    try:
+        png_bytes = predict_mask_png_bytes(MODEL, image_bytes, CONFIG)
+    except SchemaErrors as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"La imagen no paso la validacion: {exc.failure_cases[['column', 'check']].to_dict('records')}",
+        )
+
+    return Response(content=png_bytes, media_type="image/png")
