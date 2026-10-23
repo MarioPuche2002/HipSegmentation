@@ -61,7 +61,7 @@ def save_processed_pairs(df: pd.DataFrame, config: dict) -> pd.DataFrame:
 
 
 def main():
-    config = load_config()
+    config = load_config(require_paths=True)
     data_cfg = config["data"]
 
     os.makedirs(data_cfg["processed_dir"], exist_ok=True)

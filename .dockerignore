@@ -1,0 +1,21 @@
+# Solo se copia al contenedor lo necesario para la API
+.git
+.github
+.venv
+venv
+env
+__pycache__
+*.pyc
+.pytest_cache
+.ipynb_checkpoints
+notebooks
+data
+docs
+logs
+tests
+paths.toml
+models/training_history.csv
+*.md
+Dockerfile
+docker-compose.yml
+.dockerignore
