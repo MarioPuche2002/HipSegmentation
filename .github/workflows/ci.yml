@@ -7,9 +7,8 @@ on:
     branches: [main]
 
 jobs:
-  validar-datos:
+  tests:
     runs-on: ubuntu-latest
-
     steps:
       - name: Descargar el codigo del repositorio
         uses: actions/checkout@v4
@@ -18,11 +17,29 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.9"
+          cache: pip
 
-      - name: Instalar dependencias
+      - name: Instalar dependencias de la API + pytest
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements-api.txt pytest==8.2.0 httpx==0.27.0
 
-      - name: Correr tests de validacion de datos (pandera)
-        run: pytest tests/test_schema.py -v
+      - name: Tests de validacion de datos (pandera) y de la API
+        run: pytest tests -v
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Construir la imagen Docker
+        run: docker build -t hip-segmentation .
+
+      - name: Levantar el contenedor y probar /health y /predict
+        run: |
+          docker run -d --name api -p 8000:8000 --memory 512m hip-segmentation
+          for i in $(seq 1 30); do curl -sf http://localhost:8000/health && break; sleep 2; done
+          curl -sf http://localhost:8000/health
+          curl -sf -o /dev/null -F "file=@tests/manual_samples/Hip_Image1.jpg;type=image/jpeg" http://localhost:8000/predict
+          docker logs api
