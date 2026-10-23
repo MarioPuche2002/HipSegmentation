@@ -50,7 +50,12 @@ class SegmentationResponse(BaseModel):
 @app.on_event("startup")
 def startup_event():
     global MODEL
-    model_path = CONFIG["model"]["output_path"]
+        # MODEL_PATH permite elegir el modelo sin tocar config.yaml.
+    # Por defecto la API usa el .tflite (liviano); si no existe, el .h5.
+    model_path = os.getenv("MODEL_PATH") or CONFIG["model"]["serving_path"]
+    if not os.path.isfile(model_path):
+        logger.warning("No existe %s, se usa el modelo Keras %s", model_path, CONFIG["model"]["output_path"])
+        model_path = CONFIG["model"]["output_path"]
     logger.info("Cargando modelo desde %s ...", model_path)
     inicio = time.perf_counter()
     try:

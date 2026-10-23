@@ -38,6 +38,8 @@ model:
   optimizer: adam
   loss: sparse_categorical_crossentropy
   output_path: models/hip_segmentation_unet.h5
+  # Modelo que usa la API (Docker / Render). Se genera con: python -m src.export_tflite
+  serving_path: models/hip_segmentation_unet.tflite
 
 api:
   host: 0.0.0.0

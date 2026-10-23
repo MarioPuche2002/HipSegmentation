@@ -1,0 +1,19 @@
+# Dependencias MINIMAS para servir la API (Docker / Render).
+# - tflite-runtime en vez de tensorflow: la API usa el modelo .tflite
+#   (ver src/export_tflite.py) y gasta ~5 veces menos RAM que TensorFlow.
+# - opencv-python-headless: OpenCV sin interfaz grafica (no necesita libGL).
+# - sin jupyter, matplotlib, seaborn ni pytest (solo se usan en desarrollo).
+# Para entrenar / notebooks sigue usando requirements.txt
+tflite-runtime==2.14.0
+numpy==1.23.5
+pandas==1.5.3
+scikit-learn==1.2.2
+pandera==0.15.2
+multimethod==1.9.1
+opencv-python-headless==4.9.0.80
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+python-multipart==0.0.9
+pillow==10.3.0
+pyyaml==6.0.1
+tomli==2.0.1

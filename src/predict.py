@@ -21,7 +21,6 @@ import time
 
 import numpy as np
 import pandas as pd
-import tensorflow as tf
 from PIL import Image
 
 from src.image_utils import extract_image_metadata_from_bytes
@@ -40,8 +39,47 @@ CLASS_COLORS = np.array([
 ], dtype=np.uint8)
 
 
-def load_model(model_path: str, expected_size: int = None) -> tf.keras.Model:
-    model = tf.keras.models.load_model(model_path)
+class TFLiteSegmenter:
+    """
+    Envuelve un interprete de TensorFlow Lite con la misma interfaz que
+    usa la API de un modelo Keras: .input_shape y .predict(batch).
+    Usa tflite-runtime (liviano, para Docker/Render) y, si no esta
+    instalado, el interprete incluido en TensorFlow completo.
+    """
+
+    def __init__(self, model_path: str):
+        try:
+            from tflite_runtime.interpreter import Interpreter
+            backend = "tflite-runtime"
+        except ImportError:  # p. ej. en Windows, con el TensorFlow de requirements.txt
+            import tensorflow as tf
+            Interpreter = tf.lite.Interpreter
+            backend = "tensorflow.lite"
+
+        self.interpreter = Interpreter(model_path=model_path)
+        self.interpreter.allocate_tensors()
+        self._input = self.interpreter.get_input_details()[0]
+        self._output = self.interpreter.get_output_details()[0]
+        self.input_shape = tuple(None if i == 0 else int(d) for i, d in enumerate(self._input["shape"]))
+        self.backend = backend
+
+    def predict(self, batch: np.ndarray, verbose: int = 0) -> np.ndarray:
+        salidas = []
+        for imagen in batch:  # el modelo TFLite se exporto con batch = 1
+            self.interpreter.set_tensor(self._input["index"], imagen[np.newaxis].astype(np.float32))
+            self.interpreter.invoke()
+            salidas.append(self.interpreter.get_tensor(self._output["index"])[0])
+        return np.stack(salidas)
+
+
+def load_model(model_path: str, expected_size: int = None):
+    """Carga un modelo .tflite (produccion) o .h5 de Keras (desarrollo)."""
+    if model_path.endswith(".tflite"):
+        model = TFLiteSegmenter(model_path)
+        logger.info("Modelo TFLite cargado con %s", model.backend)
+    else:
+        import tensorflow as tf  # solo se importa si de verdad se usa el .h5
+        model = tf.keras.models.load_model(model_path)
 
     # Verifica que el modelo guardado espere la misma resolucion que
     # config.yaml (128x128x1). Si alguien cambia el tamaño en config.yaml
@@ -113,7 +151,7 @@ def preparar_imagen_para_el_modelo(image_bytes: bytes, target_size: int, ya_cump
     return batch
 
 
-def predict_mask(model: tf.keras.Model, image_bytes: bytes, config: dict) -> dict:
+def predict_mask(model, image_bytes: bytes, config: dict) -> dict:
     val_cfg = config["image_validation"]
     target_size = config["model"]["image_size"]
 
