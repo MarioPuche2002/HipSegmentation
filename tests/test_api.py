@@ -40,3 +40,20 @@ def test_predict_devuelve_mascara(client):
 def test_predict_rechaza_archivos_que_no_son_imagen(client):
     response = client.post("/predict", files={"file": ("notas.txt", b"hola", "text/plain")})
     assert response.status_code == 400
+
+
+@pytest.mark.parametrize("vista", ["superpuesta", "mascara"])
+def test_predict_imagen_devuelve_png(client, vista):
+    import io
+    import json
+
+    from PIL import Image
+
+    with open(SAMPLE, "rb") as f:
+        response = client.post(f"/predict/imagen?vista={vista}",
+                               files={"file": ("Hip_Image1.jpg", f, "image/jpeg")})
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/png"
+    assert Image.open(io.BytesIO(response.content)).size == (640, 640)  # tamaño de la radiografia
+    porcentajes = json.loads(response.headers["X-Porcentaje-Por-Clase"])
+    assert set(porcentajes) == {f"clase_{i}" for i in range(5)}

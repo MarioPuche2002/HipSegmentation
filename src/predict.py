@@ -151,7 +151,8 @@ def preparar_imagen_para_el_modelo(image_bytes: bytes, target_size: int, ya_cump
     return batch
 
 
-def predict_mask(model, image_bytes: bytes, config: dict) -> dict:
+def segmentar(model, image_bytes: bytes, config: dict):
+    """Valida, preprocesa y segmenta. Devuelve (mascara 128x128, % por clase, se_aplico_preprocesamiento)."""
     val_cfg = config["image_validation"]
     target_size = config["model"]["image_size"]
 
@@ -178,15 +179,41 @@ def predict_mask(model, image_bytes: bytes, config: dict) -> dict:
         f"clase_{i}": round(float((mask == i).sum()) / total_pixels * 100, 2)
         for i in range(pred.shape[-1])
     }
+    return mask, distribucion_por_clase, not ya_cumple
 
-    colored_mask = CLASS_COLORS[mask]
-    mask_image = Image.fromarray(colored_mask)
+
+def _to_png_bytes(image: Image.Image) -> bytes:
     buffer = io.BytesIO()
-    mask_image.save(buffer, format="PNG")
-    mask_base64 = base64.b64encode(buffer.getvalue()).decode("utf-8")
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def mascara_coloreada_png(mask: np.ndarray, size=None) -> bytes:
+    """Mascara con un color por clase. size=(ancho, alto) la agranda sin mezclar clases (NEAREST)."""
+    image = Image.fromarray(CLASS_COLORS[mask])
+    if size is not None:
+        image = image.resize(size, Image.NEAREST)
+    return _to_png_bytes(image)
+
+
+def mascara_superpuesta_png(image_bytes: bytes, mask: np.ndarray, alpha: float = 0.45) -> bytes:
+    """
+    Radiografia original (a su tamaño real) con la mascara coloreada
+    encima. El fondo (clase 0) se deja sin color para ver el hueso.
+    """
+    original = Image.open(io.BytesIO(image_bytes)).convert("L").convert("RGB")
+    colored = Image.fromarray(CLASS_COLORS[mask]).resize(original.size, Image.NEAREST)
+    region = Image.fromarray(((mask > 0) * int(255 * alpha)).astype(np.uint8)).resize(original.size, Image.NEAREST)
+    original.paste(colored, (0, 0), region)
+    return _to_png_bytes(original)
+
+
+def predict_mask(model, image_bytes: bytes, config: dict) -> dict:
+    mask, distribucion_por_clase, se_preprocesa = segmentar(model, image_bytes, config)
+    mask_base64 = base64.b64encode(mascara_coloreada_png(mask)).decode("utf-8")
 
     return {
         "mascara_png_base64": mask_base64,
         "porcentaje_pixeles_por_clase": distribucion_por_clase,
-        "se_aplico_preprocesamiento": not ya_cumple,
+        "se_aplico_preprocesamiento": se_preprocesa,
     }

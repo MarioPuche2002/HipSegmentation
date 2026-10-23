@@ -1,7 +1,10 @@
 """
 API de segmentacion de cadera. Recibe una radiografia (solo eso, NUNCA
 una mascara -- la mascara es lo que este servicio genera) y devuelve
-la mascara de segmentacion predicha, coloreada, como PNG en base64.
+la mascara de segmentacion predicha, coloreada:
+
+    POST /predict          -> JSON (mascara PNG en base64 + % por clase)
+    POST /predict/imagen   -> la imagen PNG directamente (Swagger la muestra)
 
 Ejecutar en local:
     uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
@@ -13,20 +16,25 @@ import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # DEBE ir antes de importar tensorflow
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")  # oculta los avisos internos de TF
 
+import io
+import json
 import logging
 import time
 import uuid
+from enum import Enum
 from typing import Dict
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from pandera.errors import SchemaErrors
+from PIL import Image
 from pydantic import BaseModel
 
 from src.config import load_config
 from src.logger import get_logger
-from src.predict import load_model, predict_mask
+from src.predict import (load_model, mascara_coloreada_png, mascara_superpuesta_png,
+                         predict_mask, segmentar)
 
 logger = get_logger("api")
 
@@ -50,7 +58,7 @@ class SegmentationResponse(BaseModel):
 @app.on_event("startup")
 def startup_event():
     global MODEL
-        # MODEL_PATH permite elegir el modelo sin tocar config.yaml.
+    # MODEL_PATH permite elegir el modelo sin tocar config.yaml.
     # Por defecto la API usa el .tflite (liviano); si no existe, el .h5.
     model_path = os.getenv("MODEL_PATH") or CONFIG["model"]["serving_path"]
     if not os.path.isfile(model_path):
@@ -85,6 +93,8 @@ async def log_requests(request: Request, call_next):
 
     duracion_ms = (time.perf_counter() - inicio) * 1000
     nivel = logging.WARNING if response.status_code >= 400 else logging.INFO
+    if request.url.path == "/health" and response.status_code == 200:
+        nivel = logging.DEBUG  # Render y Docker consultan /health cada pocos segundos
     logger.log(nivel, "[%s] %s %s -> %d (%.1f ms)", request_id, request.method,
                request.url.path, response.status_code, duracion_ms)
     response.headers["X-Request-ID"] = request_id
@@ -120,6 +130,12 @@ async def error_de_validacion_en_espanol(request: Request, exc: RequestValidatio
     return JSONResponse(status_code=422, content={"detail": errores_traducidos})
 
 
+@app.get("/", include_in_schema=False)
+def inicio():
+    """La URL publica de Render abre directamente la documentacion interactiva."""
+    return RedirectResponse(url="/docs")
+
+
 @app.get("/health")
 def health():
     size = CONFIG["model"]["image_size"]
@@ -130,10 +146,8 @@ def health():
     }
 
 
-@app.post("/predict", response_model=SegmentationResponse)
-async def predict(request: Request, file: UploadFile = File(...)):
+async def _leer_imagen(request: Request, file: UploadFile) -> bytes:
     request_id = getattr(request.state, "request_id", "-")
-
     if file.content_type not in ("image/png", "image/jpeg", "image/jpg"):
         logger.warning("[%s] Archivo rechazado '%s': tipo %s no permitido",
                        request_id, file.filename, file.content_type)
@@ -142,18 +156,76 @@ async def predict(request: Request, file: UploadFile = File(...)):
     image_bytes = await file.read()
     logger.info("[%s] Imagen recibida '%s' (%s, %.1f KB)", request_id, file.filename,
                 file.content_type, len(image_bytes) / 1024)
+    return image_bytes
+
+
+def _rechazo_por_pandera(request: Request, file: UploadFile, exc: SchemaErrors) -> HTTPException:
+    request_id = getattr(request.state, "request_id", "-")
+    fallas = exc.failure_cases[["column", "check"]].to_dict("records")
+    logger.warning("[%s] La imagen '%s' no paso la validacion de pandera: %s",
+                   request_id, file.filename, fallas)
+    return HTTPException(status_code=400, detail=f"La imagen no paso la validacion: {fallas}")
+
+
+@app.post("/predict", response_model=SegmentationResponse)
+async def predict(request: Request, file: UploadFile = File(...)):
+    """Devuelve JSON: mascara 128x128 en PNG base64 + porcentaje de pixeles por clase."""
+    request_id = getattr(request.state, "request_id", "-")
+    image_bytes = await _leer_imagen(request, file)
 
     try:
         result = predict_mask(MODEL, image_bytes, CONFIG)
     except SchemaErrors as exc:
-        fallas = exc.failure_cases[["column", "check"]].to_dict("records")
-        logger.warning("[%s] La imagen '%s' no paso la validacion de pandera: %s",
-                       request_id, file.filename, fallas)
-        raise HTTPException(
-            status_code=400,
-            detail=f"La imagen no paso la validacion: {fallas}",
-        )
+        raise _rechazo_por_pandera(request, file, exc)
 
     logger.info("[%s] Segmentacion lista. Pixeles por clase (%%): %s",
                 request_id, result["porcentaje_pixeles_por_clase"])
     return result
+
+
+class Vista(str, Enum):
+    superpuesta = "superpuesta"
+    mascara = "mascara"
+
+
+@app.post(
+    "/predict/imagen",
+    response_class=Response,
+    responses={200: {"content": {"image/png": {}},
+                     "description": "PNG de la segmentacion (Swagger lo muestra como imagen)"}},
+)
+async def predict_imagen(request: Request, file: UploadFile = File(...),
+                         vista: Vista = Query(Vista.superpuesta,
+                                              description="superpuesta = radiografia con la mascara encima; "
+                                                          "mascara = solo la mascara coloreada")):
+    """
+    Devuelve directamente una IMAGEN PNG, al tamaño de la radiografia
+    subida. Los porcentajes por clase van en la cabecera
+    X-Porcentaje-Por-Clase (JSON) para no perder esa informacion.
+    """
+    request_id = getattr(request.state, "request_id", "-")
+    image_bytes = await _leer_imagen(request, file)
+
+    try:
+        mask, distribucion, se_preprocesa = segmentar(MODEL, image_bytes, CONFIG)
+    except SchemaErrors as exc:
+        raise _rechazo_por_pandera(request, file, exc)
+
+    if vista == Vista.superpuesta:
+        png = mascara_superpuesta_png(image_bytes, mask)
+    else:
+        size = Image.open(io.BytesIO(image_bytes)).size
+        png = mascara_coloreada_png(mask, size=size)
+
+    logger.info("[%s] Imagen '%s' generada (%.1f KB). Pixeles por clase (%%): %s",
+                request_id, vista.value, len(png) / 1024, distribucion)
+    nombre = os.path.splitext(file.filename or "imagen")[0]
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={
+            "X-Porcentaje-Por-Clase": json.dumps(distribucion),
+            "X-Se-Aplico-Preprocesamiento": str(se_preprocesa).lower(),
+            "Content-Disposition": f'inline; filename="{nombre}_{vista.value}.png"',
+        },
+    )

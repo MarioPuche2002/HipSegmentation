@@ -42,4 +42,6 @@ jobs:
           for i in $(seq 1 30); do curl -sf http://localhost:8000/health && break; sleep 2; done
           curl -sf http://localhost:8000/health
           curl -sf -o /dev/null -F "file=@tests/manual_samples/Hip_Image1.jpg;type=image/jpeg" http://localhost:8000/predict
+          curl -sf -o segmentacion.png -F "file=@tests/manual_samples/Hip_Image1.jpg;type=image/jpeg" http://localhost:8000/predict/imagen
+          file segmentacion.png
           docker logs api
