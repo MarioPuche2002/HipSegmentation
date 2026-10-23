@@ -17,6 +17,7 @@ import base64
 import io
 import os
 import tempfile
+import time
 
 import numpy as np
 import pandas as pd
@@ -24,8 +25,11 @@ import tensorflow as tf
 from PIL import Image
 
 from src.image_utils import extract_image_metadata_from_bytes
+from src.logger import get_logger
 from src.pipeline import build_image_pipeline
 from src.schema import build_single_image_schema, validate_single_image
+
+logger = get_logger(__name__)
 
 CLASS_COLORS = np.array([
     [0, 0, 0],
@@ -36,8 +40,21 @@ CLASS_COLORS = np.array([
 ], dtype=np.uint8)
 
 
-def load_model(model_path: str) -> tf.keras.Model:
-    return tf.keras.models.load_model(model_path)
+def load_model(model_path: str, expected_size: int = None) -> tf.keras.Model:
+    model = tf.keras.models.load_model(model_path)
+
+    # Verifica que el modelo guardado espere la misma resolucion que
+    # config.yaml (128x128x1). Si alguien cambia el tamaño en config.yaml
+    # sin reentrenar, la API falla al arrancar con un mensaje claro en
+    # vez de fallar en cada peticion.
+    _, height, width, channels = model.input_shape
+    if expected_size is not None and (height, width) != (expected_size, expected_size):
+        raise ValueError(
+            f"El modelo en '{model_path}' espera entradas de {height}x{width}, "
+            f"pero config.yaml define image_size={expected_size}. "
+            f"Reentrena el modelo o corrige config.yaml."
+        )
+    return model
 
 
 def validate_uploaded_image(image_bytes: bytes, val_cfg: dict) -> dict:
@@ -50,6 +67,7 @@ def validate_uploaded_image(image_bytes: bytes, val_cfg: dict) -> dict:
         min_size=val_cfg["min_size"],
         max_size=val_cfg["max_size"],
     )
+    logger.debug("Metadatos de la imagen subida: %s", metadata)
     validate_single_image(df, schema)
 
     return metadata
@@ -103,13 +121,18 @@ def predict_mask(model: tf.keras.Model, image_bytes: bytes, config: dict) -> dic
 
     ya_cumple = cumple_condiciones_del_modelo(metadata, target_size)
     if ya_cumple:
-        print("La imagen ya cumple las condiciones del modelo -- se segmenta directamente")
+        logger.info("Imagen %sx%s, %s canal(es): ya cumple las condiciones del modelo -- se segmenta directamente",
+                    metadata["img_width"], metadata["img_height"], metadata["img_channels"])
     else:
-        print("La imagen no cumple las condiciones del modelo -- se aplica preprocesamiento")
+        logger.info("Imagen %sx%s, %s canal(es): se aplica preprocesamiento (resize a %dx%d + ecualizacion)",
+                    metadata["img_width"], metadata["img_height"], metadata["img_channels"],
+                    target_size, target_size)
 
     batch = preparar_imagen_para_el_modelo(image_bytes, target_size, ya_cumple)
 
+    inicio = time.perf_counter()
     pred = model.predict(batch, verbose=0)[0]
+    logger.info("Inferencia del U-Net en %.0f ms", (time.perf_counter() - inicio) * 1000)
     mask = np.argmax(pred, axis=-1).astype(np.uint8)
 
     total_pixels = mask.size

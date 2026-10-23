@@ -9,6 +9,9 @@ import pandas as pd
 from sklearn.model_selection import train_test_split
 
 from src.config import load_config
+from src.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def split_manifest(df: pd.DataFrame, val_size: float, test_size: float, random_state: int):
@@ -23,7 +26,7 @@ def main():
     data_cfg = config["data"]
 
     manifest = pd.read_csv(data_cfg["manifest_path"])
-    print(f"Manifest cargado: {len(manifest)} pares procesados")
+    logger.info("Manifest cargado: %d pares procesados", len(manifest))
 
     train_df, val_df, test_df = split_manifest(
         manifest, data_cfg["val_size"], data_cfg["test_size"], data_cfg["random_state"]
@@ -33,7 +36,7 @@ def main():
     val_df.to_csv(data_cfg["val_path"], index=False)
     test_df.to_csv(data_cfg["test_path"], index=False)
 
-    print(f"train: {len(train_df)}  val: {len(val_df)}  test: {len(test_df)}")
+    logger.info("train: %d  val: %d  test: %d", len(train_df), len(val_df), len(test_df))
 
 
 if __name__ == "__main__":

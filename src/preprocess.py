@@ -13,7 +13,10 @@ from PIL import Image
 from tqdm import tqdm
 
 from src.config import load_config
+from src.logger import get_logger
 from src.pipeline import build_image_pipeline, build_mask_pipeline
+
+logger = get_logger(__name__)
 
 
 def build_filepaths(dataset_csv: str, images_dir: str, masks_dir: str) -> pd.DataFrame:
@@ -40,9 +43,9 @@ def save_processed_pairs(df: pd.DataFrame, config: dict) -> pd.DataFrame:
     img_paths = df["img_filepath"].tolist()
     msk_paths = df["msk_filepath"].tolist()
 
-    print("Corriendo pipeline de sklearn sobre imagenes (resize + ecualizacion por gradiente)...")
+    logger.info("Corriendo pipeline de sklearn sobre imagenes (resize %dx%d + ecualizacion por gradiente)...", prep_cfg["target_size"], prep_cfg["target_size"])
     processed_imgs = image_pipeline.fit_transform(img_paths)
-    print("Corriendo pipeline de sklearn sobre mascaras (resize nearest)...")
+    logger.info("Corriendo pipeline de sklearn sobre mascaras (resize nearest)...")
     processed_msks = mask_pipeline.fit_transform(msk_paths)
 
     final_img_paths, final_msk_paths = [], []
@@ -63,16 +66,16 @@ def main():
 
     os.makedirs(data_cfg["processed_dir"], exist_ok=True)
 
-    print("=== 1/2 Armando rutas desde dataset.csv ===")
+    logger.info("=== 1/2 Armando rutas desde dataset.csv ===")
     df = build_filepaths(config["paths"]["dataset_csv"], config["paths"]["images_dir"], config["paths"]["masks_dir"])
-    print(f"Total de pares: {len(df)}")
+    logger.info("Total de pares: %d", len(df))
 
-    print("\n=== 2/2 Corriendo pipelines (sklearn) de resize/ecualizacion ===")
+    logger.info("=== 2/2 Corriendo pipelines (sklearn) de resize/ecualizacion ===")
     processed_df = save_processed_pairs(df, config)
     processed_df.to_csv(data_cfg["manifest_path"], index=False)
 
-    print(f"\nListo. {len(processed_df)} pares procesados. Manifest en: {data_cfg['manifest_path']}")
-    print("Siguiente paso: python -m src.features")
+    logger.info("Listo. %d pares procesados. Manifest en: %s", len(processed_df), data_cfg["manifest_path"])
+    logger.info("Siguiente paso: python -m src.features")
 
 
 if __name__ == "__main__":

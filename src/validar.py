@@ -14,7 +14,10 @@ import tensorflow as tf
 from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay, f1_score
 
 from src.config import load_config
+from src.logger import get_logger
 from src.train import load_split
+
+logger = get_logger(__name__)
 
 
 def dice_sklearn(y_true, y_pred, num_classes):
@@ -47,7 +50,7 @@ def plot_training_metrics(losses, output_path="models/reports/training_curves.pn
     plt.tight_layout()
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     plt.savefig(output_path, dpi=150, bbox_inches="tight")
-    print(f"Curvas de entrenamiento guardadas en {output_path}")
+    logger.info("Curvas de entrenamiento guardadas en %s", output_path)
 
 
 def evaluate_model(unet, x_val, y_val, num_classes):
@@ -72,7 +75,7 @@ def evaluate_model(unet, x_val, y_val, num_classes):
     plt.title("Matriz de confusion por pixel - conjunto de TEST")
     os.makedirs("models/reports", exist_ok=True)
     plt.savefig("models/reports/confusion_matrix.png", bbox_inches="tight")
-    print("Matriz de confusion guardada en models/reports/confusion_matrix.png")
+    logger.info("Matriz de confusion guardada en models/reports/confusion_matrix.png")
 
     return dice_scores, dice_global, cm
 
@@ -85,20 +88,20 @@ def main():
     x_test, y_test = load_split(test_df, prep_cfg["normalize_images"])
 
     unet = tf.keras.models.load_model(model_cfg["output_path"])
-    print(unet.metrics_names)
+    logger.info("Metricas del modelo: %s", unet.metrics_names)
 
     history_path = "models/training_history.csv"
     if os.path.exists(history_path):
         losses = pd.read_csv(history_path)
         plot_training_metrics(losses)
     else:
-        print(f"[AVISO] No se encontro {history_path}, se omite el grafico de curvas.")
+        logger.warning("No se encontro %s, se omite el grafico de curvas.", history_path)
 
     dice_scores, dice_global, cm = evaluate_model(unet, x_test, y_test, num_classes=model_cfg["num_classes"])
 
-    print("Dice por clases:", dice_scores)
-    print("Dice global:", dice_global)
-    print("Cantidad de pixeles clasificados correctamente:", np.trace(cm))
+    logger.info("Dice por clases: %s", dice_scores)
+    logger.info("Dice global: %s", dice_global)
+    logger.info("Cantidad de pixeles clasificados correctamente: %d", np.trace(cm))
 
 
 if __name__ == "__main__":

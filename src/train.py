@@ -12,19 +12,23 @@ import tensorflow as tf
 from tensorflow.keras.callbacks import EarlyStopping
 
 from src.config import load_config
+from src.logger import get_logger
 from src.model import create_unet_model
+
+logger = get_logger(__name__)
 
 
 def gpu_setup():
     gpus = tf.config.experimental.list_physical_devices('GPU')
     if gpus:
+        logger.info("GPUs encontradas: %s", gpus)
         try:
             for gpu in gpus:
                 tf.config.experimental.set_memory_growth(gpu, True)
         except RuntimeError as e:
-            print("Error configuring GPU memory growth:", {e})
+            logger.error("Error configurando memory growth de la GPU: %s", e)
     else:
-        print("No GPUs found.")
+        logger.warning("No se encontraron GPUs, se entrena en CPU.")
 
 
 def load_split(df: pd.DataFrame, normalize_images: bool):
@@ -65,12 +69,12 @@ def main():
     train_df = pd.read_csv(data_cfg["train_path"])
     val_df = pd.read_csv(data_cfg["val_path"])
 
-    print(f"Cargando {len(train_df)} imagenes de entrenamiento y {len(val_df)} de validacion...")
+    logger.info("Cargando %d imagenes de entrenamiento y %d de validacion...", len(train_df), len(val_df))
     x_train, y_train = load_split(train_df, prep_cfg["normalize_images"])
     x_val, y_val = load_split(val_df, prep_cfg["normalize_images"])
 
     unet = create_unet_model(model_cfg["image_size"], model_cfg["num_classes"], model_cfg["base_filters"])
-    unet.summary()
+    unet.summary(print_fn=logger.info)
 
     unet = train_model(
         unet, x_train, y_train, x_val, y_val,
@@ -80,11 +84,11 @@ def main():
     )
 
     unet.save(model_cfg["output_path"])
-    print(f"Modelo guardado en {model_cfg['output_path']}")
+    logger.info("Modelo guardado en %s", model_cfg["output_path"])
 
     history_df = pd.DataFrame(unet.history.history)
     history_df.to_csv("models/training_history.csv", index=False)
-    print("Historial de entrenamiento guardado en models/training_history.csv")
+    logger.info("Historial de entrenamiento guardado en models/training_history.csv (%d epocas)", len(history_df))
 
 
 if __name__ == "__main__":

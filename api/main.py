@@ -11,7 +11,11 @@ Luego abrir http://localhost:8000/docs
 import os
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"  # DEBE ir antes de importar tensorflow
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")  # oculta los avisos internos de TF
 
+import logging
+import time
+import uuid
 from typing import Dict
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
@@ -21,7 +25,10 @@ from pandera.errors import SchemaErrors
 from pydantic import BaseModel
 
 from src.config import load_config
+from src.logger import get_logger
 from src.predict import load_model, predict_mask
+
+logger = get_logger("api")
 
 CONFIG = load_config()
 
@@ -43,8 +50,40 @@ class SegmentationResponse(BaseModel):
 @app.on_event("startup")
 def startup_event():
     global MODEL
-    MODEL = load_model(CONFIG["model"]["output_path"], expected_size=CONFIG["model"]["image_size"])
-    print(f"Modelo cargado desde {CONFIG['model']['output_path']} (corriendo en CPU)")
+    model_path = CONFIG["model"]["output_path"]
+    logger.info("Cargando modelo desde %s ...", model_path)
+    inicio = time.perf_counter()
+    try:
+        MODEL = load_model(model_path, expected_size=CONFIG["model"]["image_size"])
+    except Exception:
+        logger.exception("No se pudo cargar el modelo desde %s", model_path)
+        raise
+    logger.info(
+        "Modelo cargado en %.2f s (entrada %s, corriendo en CPU)",
+        time.perf_counter() - inicio, MODEL.input_shape,
+    )
+
+
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    """Registra cada peticion: id, metodo, ruta, codigo de respuesta y duracion."""
+    request_id = uuid.uuid4().hex[:8]
+    request.state.request_id = request_id
+    inicio = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception:
+        duracion_ms = (time.perf_counter() - inicio) * 1000
+        logger.exception("[%s] %s %s -> 500 (%.1f ms) error no controlado",
+                         request_id, request.method, request.url.path, duracion_ms)
+        return JSONResponse(status_code=500, content={"detail": "Error interno del servidor"})
+
+    duracion_ms = (time.perf_counter() - inicio) * 1000
+    nivel = logging.WARNING if response.status_code >= 400 else logging.INFO
+    logger.log(nivel, "[%s] %s %s -> %d (%.1f ms)", request_id, request.method,
+               request.url.path, response.status_code, duracion_ms)
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 
 @app.exception_handler(RequestValidationError)
@@ -72,6 +111,7 @@ async def error_de_validacion_en_espanol(request: Request, exc: RequestValidatio
             "mensaje": mensaje,
         })
 
+    logger.warning("Peticion invalida en %s: %s", request.url.path, errores_traducidos)
     return JSONResponse(status_code=422, content={"detail": errores_traducidos})
 
 
@@ -86,18 +126,29 @@ def health():
 
 
 @app.post("/predict", response_model=SegmentationResponse)
-async def predict(file: UploadFile = File(...)):
+async def predict(request: Request, file: UploadFile = File(...)):
+    request_id = getattr(request.state, "request_id", "-")
+
     if file.content_type not in ("image/png", "image/jpeg", "image/jpg"):
+        logger.warning("[%s] Archivo rechazado '%s': tipo %s no permitido",
+                       request_id, file.filename, file.content_type)
         raise HTTPException(status_code=400, detail="Solo se aceptan imagenes PNG o JPEG")
 
     image_bytes = await file.read()
+    logger.info("[%s] Imagen recibida '%s' (%s, %.1f KB)", request_id, file.filename,
+                file.content_type, len(image_bytes) / 1024)
 
     try:
         result = predict_mask(MODEL, image_bytes, CONFIG)
     except SchemaErrors as exc:
+        fallas = exc.failure_cases[["column", "check"]].to_dict("records")
+        logger.warning("[%s] La imagen '%s' no paso la validacion de pandera: %s",
+                       request_id, file.filename, fallas)
         raise HTTPException(
             status_code=400,
-            detail=f"La imagen no paso la validacion: {exc.failure_cases[['column', 'check']].to_dict('records')}",
+            detail=f"La imagen no paso la validacion: {fallas}",
         )
 
+    logger.info("[%s] Segmentacion lista. Pixeles por clase (%%): %s",
+                request_id, result["porcentaje_pixeles_por_clase"])
     return result

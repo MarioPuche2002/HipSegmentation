@@ -25,3 +25,6 @@ __pycache__/
 
 # Sistema
 .DS_Store
+# Logs de ejecucion (los genera src/logger.py)
+logs/
+*.log
