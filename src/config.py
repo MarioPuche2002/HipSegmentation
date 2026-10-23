@@ -26,4 +26,12 @@ def load_config(config_path: str = "config.yaml", paths_path: str = "paths.toml"
         ) from exc
 
     config["paths"] = paths["data"]
+
+    target = config["preprocessing"]["target_size"]
+    image_size = config["model"]["image_size"]
+    if target != image_size:
+        raise ValueError(
+            f"preprocessing.target_size ({target}) y model.image_size ({image_size}) "
+            f"deben ser iguales en config.yaml"
+        )
     return config

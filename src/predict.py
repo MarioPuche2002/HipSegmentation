@@ -36,8 +36,21 @@ CLASS_COLORS = np.array([
 ], dtype=np.uint8)
 
 
-def load_model(model_path: str) -> tf.keras.Model:
-    return tf.keras.models.load_model(model_path)
+def load_model(model_path: str, expected_size: int = None) -> tf.keras.Model:
+    model = tf.keras.models.load_model(model_path)
+
+    # Verifica que el modelo guardado espere la misma resolucion que
+    # config.yaml (128x128x1). Si alguien cambia el tamaño en config.yaml
+    # sin reentrenar, la API falla al arrancar con un mensaje claro en
+    # vez de fallar en cada peticion.
+    _, height, width, channels = model.input_shape
+    if expected_size is not None and (height, width) != (expected_size, expected_size):
+        raise ValueError(
+            f"El modelo en '{model_path}' espera entradas de {height}x{width}, "
+            f"pero config.yaml define image_size={expected_size}. "
+            f"Reentrena el modelo o corrige config.yaml."
+        )
+    return model
 
 
 def validate_uploaded_image(image_bytes: bytes, val_cfg: dict) -> dict:

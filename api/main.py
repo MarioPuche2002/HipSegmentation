@@ -43,7 +43,7 @@ class SegmentationResponse(BaseModel):
 @app.on_event("startup")
 def startup_event():
     global MODEL
-    MODEL = load_model(CONFIG["model"]["output_path"])
+    MODEL = load_model(CONFIG["model"]["output_path"], expected_size=CONFIG["model"]["image_size"])
     print(f"Modelo cargado desde {CONFIG['model']['output_path']} (corriendo en CPU)")
 
 
@@ -77,7 +77,12 @@ async def error_de_validacion_en_espanol(request: Request, exc: RequestValidatio
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "modelo_cargado": MODEL is not None}
+    size = CONFIG["model"]["image_size"]
+    return {
+        "status": "ok",
+        "modelo_cargado": MODEL is not None,
+        "resolucion_entrada": f"{size}x{size}",
+    }
 
 
 @app.post("/predict", response_model=SegmentationResponse)

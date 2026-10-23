@@ -21,13 +21,15 @@ image_validation:
   num_classes: 5
 
 preprocessing:
+  # Resolucion de trabajo: TODAS las imagenes (entrenamiento y API) se
+  # reducen de 640x640 a 128x128. Debe coincidir con model.image_size.
   target_size: 128
   normalize_images: true
   mask_interpolation: nearest
 
 model:
   architecture: unet_custom
-  image_size: 128
+  image_size: 128          # entrada del U-Net: 128x128x1 (igual a preprocessing.target_size)
   num_classes: 5
   base_filters: 64
   batch_size: 2
